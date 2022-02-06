@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scripts
+  namespace: factorio
+data:
+  
+  fetch-mods.ts: |
+    import {
+      download,
+      Destination,
+    } from "https://deno.land/x/download@v1.0.1/mod.ts";
+
+    import { parse } from "https://deno.land/std@0.125.0/flags/mod.ts";
+
+    type ModInfo = {
+      category: string;
+      downloads_count: number;
+      name: string;
+      owner: string;
+      releases: ReleaseInfo[];
+      score: number;
+      summary: string;
+      thumbnail: string;
+      title: string;
+    };
+
+    type ReleaseInfo = {
+      download_url: string;
+      file_name: string;
+      info_json: Record<string, string>;
+      released_at: string;
+      sha1: string;
+      version: string;
+    };
+
+    type ParsedReleaseInfo = Omit<ReleaseInfo, "download_url" | "released_at"> & {
+      download_url: URL;
+      released_at: Date;
+    };
+
+    type Args = {
+      _: string[]
+      destination: string
+    }
+
+    async function parseArgs(): Promise<Args> {
+      const args = parse(Deno.args, {
+        alias: {
+          destination: "d",
+        },
+        default: {
+          destination: "/factorio/mods",
+        },
+        string: "_",
+      });
+
+      if (typeof args._ === "string") {
+        args._ = [args._]
+      }
+
+      if (args.destination instanceof Array) {
+        args.destination = args.destination[0]
+      }
+
+      const destStat = await Deno.stat(args.destination)
+      if (!destStat.isDirectory) {
+        console.error(`${args.destination} is not a directory - check that it exists. Otherwise provide a destination directory with -d|--destination`)
+        Deno.exit(1)
+      }
+
+      return {
+        _: args._ as string[],
+        destination: args.destination
+      }
+    }
+
+    function getModAPIAuth(): URLSearchParams {
+      const auth = {
+        username: Deno.env.get("FACTORIO_USERNAME") || null,
+        token: Deno.env.get("FACTORIO_TOKEN") || null,
+      };
+
+      if (auth.username === null) {
+        console.error(
+          "Mod API username not found, set $FACTORIO_USERNAME and ensure --allow-env"
+        );
+        auth.username;
+        Deno.exit(1);
+      }
+
+      if (auth.token === null) {
+        console.error(
+          "Mod API token not found, set $FACTORIO_TOKEN and ensure --allow-env"
+        );
+        Deno.exit(1);
+      }
+
+      return new URLSearchParams({
+        username: auth.username,
+        token: auth.token,
+      });
+    }
+
+    async function getModInfo(name: string): Promise<ModInfo> {
+      const resp = await fetch(`https://mods.factorio.com/api/mods/${name}`);
+      if (resp.status >= 400) {
+        throw Error(`${resp.status}: ${resp.url} - ${await resp.text()}`)
+      }
+      return (await resp.json()) as ModInfo;
+    }
+
+    function pickLatestRelease(
+      info: ModInfo,
+      query: URLSearchParams
+    ): ParsedReleaseInfo | undefined {
+      const parsed: ParsedReleaseInfo[] = info.releases.map((release) => ({
+        ...release,
+        released_at: new Date(release.released_at),
+        download_url: new URL(
+          `${release.download_url}?${query.toString()}`,
+          "https://mods.factorio.com"
+        ),
+      }));
+
+      const latest = Math.max(
+        ...parsed.map((release) => release.released_at.valueOf())
+      );
+
+      return parsed.find((release) => release.released_at.valueOf() === latest);
+    }
+
+    async function downloadMod(
+      release: ParsedReleaseInfo,
+      destination: Destination
+    ) {
+      await download(release.download_url, {
+        ...destination,
+        file: release.file_name,
+      });
+    }
+
+    async function main() {
+      const args = await parseArgs();
+      const query = getModAPIAuth();
+
+      for (const mod of args._) {
+        let modInfo, release
+
+        try {
+          modInfo = await getModInfo(mod);
+        } catch (modInfoError) {
+          console.error(`Couldn't find info about ${mod}\n${modInfoError}\n`)
+          continue
+        }
+
+        try {
+          release = pickLatestRelease(modInfo, query);
+        } catch (modInfoError) {
+          console.error(`Couldn't find releases for ${mod}\n${modInfoError}\n`)
+          continue
+        }
+
+        if (release) {
+          await downloadMod(release, { dir: args.destination });
+          
+          console.log(
+            `Downloaded ${release.file_name} from ${release.download_url.pathname}`
+            );
+          }
+        }
+    }
+
+    await main();

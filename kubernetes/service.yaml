@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: factorio
+  name: factorio
+  labels:
+    app: factorio
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: factorio.isert.link
+spec:
+  type: NodePort
+  ports:
+    - port: 34197
+      targetPort: game
+      nodePort: 30000
+      protocol: UDP
+      name: game
+    - port: 27015
+      nodePort: 30001
+      targetPort: rcon
+      protocol: TCP
+      name: rcon
+  selector:
+    app: factorio

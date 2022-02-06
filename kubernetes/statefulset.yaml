@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: factorio
+  name: factorio
+spec:
+  selector:
+    matchLabels:
+      app: factorio
+  serviceName: "nginx"
+  replicas: 1
+  # minReadySeconds: 10
+  template:
+    metadata:
+      labels:
+        app: factorio
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: factorio
+          image: factoriotools/factorio:stable
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 34197
+              protocol: UDP
+              name: game
+            - containerPort: 27015
+              protocol: TCP
+              name: rcon
+          env:
+            - name: FACTORIO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: factorio-auth
+                  key: username
+            - name: FACTORIO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: factorio-auth
+                  key: token
+          volumeMounts:
+            - name: gamedata
+              mountPath: /factorio
+
+      initContainers:
+        - name: prep-volume
+          image: busybox
+          command: 
+          - sh
+          - -c
+          - > 
+            set -x;
+            mkdir /factorio/config /factorio/mods /factorio/saves;
+            cp /config/* /factorio/config/
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: gamedata
+              mountPath: /factorio
+        - name: download-mods
+          image: denoland/deno
+          command:
+            - deno
+          args:
+            - run
+            - --allow-env=FACTORIO_USERNAME,FACTORIO_TOKEN
+            - --allow-write=/factorio/mods/
+            - --allow-read=/factorio/mods/
+            - --allow-net=mods.factorio.com,dl-mod.factorio.com
+            - /scripts/fetch-mods.ts
+            - --destination=/factorio/mods/
+            - far-reach
+            - "Flow Control"
+            - bullet-trails
+            - informatron
+            - AutoDeconstruct
+            - even-distribution
+            - Bottleneck
+            - LogisticTrainNetwork
+            - "Squeak Through"
+          env:
+            - name: FACTORIO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: factorio-auth
+                  key: username
+            - name: FACTORIO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: factorio-auth
+                  key: token
+          volumeMounts:
+            - name: gamedata
+              mountPath: /factorio
+            - name: scripts
+              mountPath: /scripts
+
+      volumes:
+        - name: scripts
+          configMap:
+            name: scripts
+        - name: config
+          projected:
+            defaultMode: 0644
+            sources:
+              - secret:
+                  name: settings
+              - secret:
+                  name: rcon-password
+                  items:
+                    - key: rconpw
+                      path: rconpw
+
+  volumeClaimTemplates:
+    - metadata:
+        name: gamedata
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: do-block-storage
+        resources:
+          requests:
+            storage: 5Gi
