@@ -2,6 +2,8 @@
 
 This repository contains deployment manifests to run a factorio server on kubernetes. Run `kubectl -f kubernetes` from within the top of the repository to deploy. These manifests are ready to deploy, no templating tools are used. The game server will run the `factoriotools/factorio` image. 
 
+> :warning: Cluster Support: This repository is not tested on managed clusters other than that of DigitalOcean's DOKS. In particular, these files use a `storageClass` based on DigitalOcean's block storage. 
+
 ## Mods
 
 This repo contains a mod downloader script to grab mods in an initContainer that runs before the server starts. The mods are pulled from mods.factorio.com, but doing so requires a secret in the same namespace called `factorio-auth` with `username` and `token` keys. 
@@ -85,3 +87,4 @@ The TCP `rcon` port is 30001.
 - [ ] Find a way to host UDP on the game's default port without needing to use `HostPort`
 - [ ] Enable the use of the player whitelist
 - [ ] Make whitelist and banlist optional
+- [ ] Use the default storage class
